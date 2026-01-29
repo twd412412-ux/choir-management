@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>🎵 찬양대 특송</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+
+    .card-gradient {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+    }
+
+    .header-gradient {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    function App() {
+      const [allSongs, setAllSongs] = useState([]);
+      const [memos, setMemos] = useState({});
+      const [loading, setLoading] = useState(true);
+      const [progress, setProgress] = useState(0);
+      const [error, setError] = useState(null);
+      const [activeTab, setActiveTab] = useState('주일찬송');
+      const [searchTerm, setSearchTerm] = useState('');
+      const [selectedDays, setSelectedDays] = useState([]);
+      const [selectedCategories, setSelectedCategories] = useState([]);
+      const [startDate, setStartDate] = useState('');
+      const [endDate, setEndDate] = useState('');
+      const [quickDate, setQuickDate] = useState('all');
+      const [showAddModal, setShowAddModal] = useState(false);
+      const [editingMemo, setEditingMemo] = useState(null);
+      const [newSong, setNewSong] = useState({
+        date: '',
+        category: '주일찬송',
+        songName: '',
+        team: '',
+        accompanist: '',
+        notes: ''
+      });
+
+      const tabs = ['주일찬송', '특별집회', '전도집회'];
+      const weekDays = ['월', '화', '수', '목', '금', '토', '일'];
+      const evangelismCategories = [
+        '오전집회', '대집회', '중집회', '청년집회', 
+        '교구집회', '기타집회', '은빛장년회집회'
+      ];
+      const allCategories = ['주일찬송', '특별집회', ...evangelismCategories];
+
+      useEffect(() => {
+        loadData();
+      }, []);
+
+      const loadData = async () => {
+        try {
+          setProgress(10);
+          const response = await fetch('data.json');
+          if (!response.ok) throw new Error('데이터 로드 실패');
+          
+          setProgress(40);
+          const jsonData = await response.json();
+          
+          setProgress(70);
+          const songs = jsonData.map(item => ({
+            id: `${item.date}_${item.title || item.songName}`,
+            date: item.date,
+            dayOfWeek: getDayOfWeek(item.date),
+            songName: item.title || item.songName || '',
+            category: item.category,
+            team: item.type || item.team || '',
+            accompanist: extractAccompanist(item.notes || ''),
+            notes: cleanNotes(item.notes || ''),
+            isCustom: false
+          }));
+
+          setProgress(90);
+          
+          const savedMemos = localStorage.getItem('songMemos');
+          if (savedMemos) setMemos(JSON.parse(savedMemos));
+
+          const customSongs = localStorage.getItem('customSongs');
+          if (customSongs) {
+            const custom = JSON.parse(customSongs);
+            setAllSongs([...songs, ...custom.map(s => ({...s, isCustom: true}))]);
+          } else {
+            setAllSongs(songs);
+          }
+
+          setProgress(100);
+          setLoading(false);
+        } catch (err) {
+          setError('데이터를 불러올 수 없습니다');
+          setLoading(false);
+        }
+      };
+
+      const getDayOfWeek = (dateStr) => {
+        const days = ['일', '월', '화', '수', '목', '금', '토'];
+        return days[new Date(dateStr).getDay()];
+      };
+
+      const extractAccompanist = (notes) => {
+        const match = notes.match(/반주:\s*([^,\n]+)/);
+        return match ? match[1].trim() : '';
+      };
+
+      const cleanNotes = (notes) => {
+        return notes.replace(/반주:\s*[^,\n]+,?\s*/, '').trim();
+      };
+
+      const filteredData = useMemo(() => {
+        let filtered = allSongs;
+
+        if (activeTab === '주일찬송') {
+          filtered = filtered.filter(item => item.category === '주일찬송');
+        } else if (activeTab === '특별집회') {
+          filtered = filtered.filter(item => item.category === '특별집회');
+        } else if (activeTab === '전도집회') {
+          filtered = filtered.filter(item => evangelismCategories.includes(item.category));
+          
+          if (selectedDays.length > 0) {
+            filtered = filtered.filter(item => selectedDays.includes(item.dayOfWeek));
+          }
+          
+          if (selectedCategories.length > 0) {
+            filtered = filtered.filter(item => selectedCategories.includes(item.category));
+          }
+        }
+
+        if (startDate) filtered = filtered.filter(item => item.date >= startDate);
+        if (endDate) filtered = filtered.filter(item => item.date <= endDate);
+
+        if (searchTerm) {
+          const term = searchTerm.toLowerCase();
+          filtered = filtered.filter(item => 
+            (item.songName || '').toLowerCase().includes(term) ||
+            (item.team || '').toLowerCase().includes(term) ||
+            (item.accompanist || '').toLowerCase().includes(term) ||
+            (item.notes || '').toLowerCase().includes(term)
+          );
+        }
+
+        return filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+      }, [allSongs, activeTab, searchTerm, selectedDays, selectedCategories, startDate, endDate]);
+
+      const handleAddSong = (e) => {
+        e.preventDefault();
+        
+        if (!newSong.date || !newSong.songName) {
+          alert('⚠️ 날짜와 곡명은 필수입니다!');
+          return;
+        }
+
+        const songData = {
+          id: `custom_${Date.now()}`,
+          date: newSong.date,
+          dayOfWeek: getDayOfWeek(newSong.date),
+          songName: newSong.songName,
+          category: newSong.category,
+          team: newSong.team,
+          accompanist: newSong.accompanist,
+          notes: newSong.notes,
+          isCustom: true
+        };
+
+        const updatedSongs = [...allSongs, songData];
+        setAllSongs(updatedSongs);
+
+        const customSongs = updatedSongs.filter(s => s.isCustom);
+        localStorage.setItem('customSongs', JSON.stringify(customSongs));
+
+        setNewSong({
+          date: '',
+          category: '주일찬송',
+          songName: '',
+          team: '',
+          accompanist: '',
+          notes: ''
+        });
+        setShowAddModal(false);
+        alert('✅ 특송이 추가되었습니다!');
+      };
+
+      const handleDeleteSong = (songId) => {
+        if (!confirm('정말 삭제하시겠습니까?')) return;
+
+        const updatedSongs = allSongs.filter(song => song.id !== songId);
+        setAllSongs(updatedSongs);
+
+        const customSongs = updatedSongs.filter(s => s.isCustom);
+        localStorage.setItem('customSongs', JSON.stringify(customSongs));
+        alert('✅ 삭제되었습니다!');
+      };
+
+      const saveMemo = (songDate, songName, memoText) => {
+        const key = `${songDate}_${songName}`;
+        const updatedMemos = { ...memos, [key]: memoText };
+        setMemos(updatedMemos);
+        localStorage.setItem('songMemos', JSON.stringify(updatedMemos));
+        setEditingMemo(null);
+        alert('✅ 메모가 저장되었습니다!');
+      };
+
+      const deleteMemo = (songDate, songName) => {
+        if (!confirm('메모를 삭제하시겠습니까?')) return;
+        const key = `${songDate}_${songName}`;
+        const updatedMemos = { ...memos };
+        delete updatedMemos[key];
+        setMemos(updatedMemos);
+        localStorage.setItem('songMemos', JSON.stringify(updatedMemos));
+        alert('✅ 메모가 삭제되었습니다!');
+      };
+
+      const setQuickDateRange = (type) => {
+        const today = new Date();
+        let start, end;
+
+        switch(type) {
+          case 'all':
+            setStartDate('');
+            setEndDate('');
+            break;
+          case '1month':
+            end = new Date();
+            start = new Date(today.setMonth(today.getMonth() - 1));
+            setStartDate(start.toISOString().split('T')[0]);
+            setEndDate(end.toISOString().split('T')[0]);
+            break;
+          case '3months':
+            end = new Date();
+            start = new Date(today.setMonth(today.getMonth() - 3));
+            setStartDate(start.toISOString().split('T')[0]);
+            setEndDate(end.toISOString().split('T')[0]);
+            break;
+          case '1year':
+            end = new Date();
+            start = new Date(today.setFullYear(today.getFullYear() - 1));
+            setStartDate(start.toISOString().split('T')[0]);
+            setEndDate(end.toISOString().split('T')[0]);
+            break;
+          case 'thisyear':
+            const year = new Date().getFullYear();
+            setStartDate(`${year}-01-01`);
+            setEndDate(`${year}-12-31`);
+            break;
+        }
+        setQuickDate(type);
+      };
+
+      const exportToExcel = () => {
+        const exportData = filteredData.map(item => ({
+          '날짜': item.date,
+          '요일': item.dayOfWeek,
+          '곡명': item.songName,
+          '카테고리': item.category,
+          '팀': item.team,
+          '반주자': item.accompanist,
+          '비고': item.notes
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        ws['!cols'] = [
+          { wch: 12 }, { wch: 6 }, { wch: 30 },
+          { wch: 15 }, { wch: 20 }, { wch: 12 }, { wch: 30 }
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '특송목록');
+
+        const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        XLSX.writeFile(wb, `특송목록_${activeTab}_${today}.xlsx`);
+        alert(`✅ ${filteredData.length}개 항목이 다운로드되었습니다!`);
+      };
+
+      const toggleDay = (day) => {
+        setSelectedDays(prev => 
+          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+        );
+      };
+
+      const toggleCategory = (cat) => {
+        setSelectedCategories(prev => 
+          prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+        );
+      };
+
+      const getMemoKey = (item) => `${item.date}_${item.songName}`;
+
+      if (loading) {
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
+              <div className="text-center">
+                <div className="text-6xl mb-6 animate-spin">
+                  <i className="fas fa-circle-notch text-purple-600"></i>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800 mb-4">
+                  🎵 찬양대 특송 관리
+                </h2>
+                <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+                  <div 
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 h-3 rounded-full transition-all duration-300"
+                    style={{width: `${progress}%`}}
+                  ></div>
+                </div>
+                <p className="text-lg font-semibold text-purple-600">{progress}%</p>
+                <p className="text-gray-600 mt-2">데이터를 불러오는 중...</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (error) {
+        return (
+          <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+              <div className="text-6xl mb-4">⚠️</div>
+              <h2 className="text-2xl font-bold text-red-600 mb-4">오류 발생</h2>
+              <p className="text-gray-700 mb-6">{error}</p>
+              <button 
+                onClick={() => window.location.reload()}
+                className="bg-purple-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-purple-700 active:scale-95 transition"
+              >
+                다시 시도
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen pb-24">
+          {/* Header */}
+          <div className="header-gradient text-white sticky top-0 z-50 shadow-lg">
+            <div className="max-w-7xl mx-auto px-4 py-6">
+              <h1 className="text-3xl md:text-4xl font-bold text-center mb-2">
+                🎵 찬양대 특송 관리
+              </h1>
+              <p className="text-center text-sm md:text-base opacity-90">
+                총 <span className="font-bold text-lg">{allSongs.length}</span>개 특송
+              </p>
+            </div>
+          </div>
+
+          <div className="max-w-7xl mx-auto px-4 py-6">
+            {/* Tabs */}
+            <div className="flex gap-2 mb-6 overflow-x-auto scrollbar-hide pb-2">
+              {tabs.map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-6 py-3 rounded-full font-semibold whitespace-nowrap transition-all active:scale-95 ${
+                    activeTab === tab
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="mb-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="🔍 곡명, 팀, 반주자 검색..."
+                  className="w-full px-6 py-4 text-lg rounded-2xl border-2 border-gray-200 focus:border-purple-500 focus:outline-none transition"
+                />
+              </div>
+            </div>
+
+            {/* Date Range */}
+            <div className="bg-white rounded-2xl p-6 mb-6 shadow-sm">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">📅 날짜 범위</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">시작일</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setQuickDate('');
+                    }}
+                    className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">종료일</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setQuickDate('');
+                    }}
+                    className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-purple-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {['all', '1month', '3months', '1year', 'thisyear'].map(type => {
+                  const labels = {
+                    all: '전체',
+                    '1month': '최근 1개월',
+                    '3months': '최근 3개월',
+                    '1year': '최근 1년',
+                    thisyear: '올해'
+                  };
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => setQuickDateRange(type)}
+                      className={`px-4 py-2 rounded-full text-sm font-semibold transition active:scale-95 ${
+                        quickDate === type
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {labels[type]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Filters for 전도집회 */}
+            {activeTab === '전도집회' && (
+              <div className="bg-white rounded-2xl p-6 mb-6 shadow-sm">
+                <h3 className="font-bold text-gray-800 mb-4 text-lg">📅 요일 필터</h3>
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {weekDays.map(day => (
+                    <button
+                      key={day}
+                      onClick={() => toggleDay(day)}
+                      className={`px-4 py-2 rounded-full font-semibold transition active:scale-95 ${
+                        selectedDays.includes(day)
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+
+                <h3 className="font-bold text-gray-800 mb-4 text-lg">📁 카테고리 필터</h3>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {evangelismCategories.map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => toggleCategory(cat)}
+                      className={`px-4 py-2 rounded-full font-semibold transition active:scale-95 text-sm ${
+                        selectedCategories.includes(cat)
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {(selectedDays.length > 0 || selectedCategories.length > 0) && (
+                  <button
+                    onClick={() => {
+                      setSelectedDays([]);
+                      setSelectedCategories([]);
+                    }}
+                    className="bg-red-500 text-white px-4 py-2 rounded-full font-semibold hover:bg-red-600 active:scale-95 transition"
+                  >
+                    <i className="fas fa-times mr-2"></i>
+                    필터 초기화
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Results Count */}
+            <div className="mb-6">
+              <p className="text-lg text-gray-700">
+                검색 결과: <span className="text-2xl font-bold text-purple-600">{filteredData.length}</span>개
+              </p>
+            </div>
+
+            {/* Results Grid */}
+            {filteredData.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="text-6xl mb-4">🔍</div>
+                <p className="text-xl text-gray-600">검색 결과가 없습니다</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredData.map((item, index) => {
+                  const memoKey = getMemoKey(item);
+                  const hasMemo = memos[memoKey];
+                  const isEditingThis = editingMemo === memoKey;
+
+                  return (
+                    <div key={item.id || index} className="bg-white rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all">
+                      {/* Card Header */}
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <i className="far fa-calendar-alt text-purple-600"></i>
+                            <span className="font-bold text-purple-600 text-lg">
+                              {item.date} ({item.dayOfWeek})
+                            </span>
+                          </div>
+                          {item.isCustom && (
+                            <span className="inline-block bg-orange-500 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                              내가 추가
+                            </span>
+                          )}
+                          {hasMemo && (
+                            <span className="inline-block bg-green-500 text-white text-xs px-3 py-1 rounded-full font-semibold ml-2">
+                              📝 메모
+                            </span>
+                          )}
+                        </div>
+                        <span className="bg-purple-600 text-white text-sm px-3 py-1 rounded-full font-semibold whitespace-nowrap">
+                          {item.category}
+                        </span>
+                      </div>
+
+                      {/* Song Name */}
+                      <h3 className="text-2xl font-bold text-gray-800 mb-4 break-words">
+                        {item.songName}
+                      </h3>
+
+                      {/* Details */}
+                      <div className="space-y-3 mb-4">
+                        {item.team && (
+                          <div className="flex items-start gap-3">
+                            <i className="fas fa-users text-purple-600 mt-1"></i>
+                            <span className="text-gray-700 flex-1">{item.team}</span>
+                          </div>
+                        )}
+                        {item.accompanist && (
+                          <div className="flex items-start gap-3">
+                            <i className="fas fa-music text-purple-600 mt-1"></i>
+                            <span className="text-gray-700 flex-1">반주: {item.accompanist}</span>
+                          </div>
+                        )}
+                        {item.notes && (
+                          <div className="flex items-start gap-3">
+                            <i className="fas fa-info-circle text-purple-600 mt-1"></i>
+                            <span className="text-gray-700 flex-1">{item.notes}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Delete Button */}
+                      {item.isCustom && (
+                        <button
+                          onClick={() => handleDeleteSong(item.id)}
+                          className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold hover:bg-red-600 active:scale-95 transition mb-4"
+                        >
+                          <i className="fas fa-trash mr-2"></i>
+                          삭제
+                        </button>
+                      )}
+
+                      {/* Memo Section */}
+                      <div className="bg-blue-50 rounded-xl p-4 border-l-4 border-purple-600">
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="font-bold text-purple-600">📝 메모</span>
+                          <div className="flex gap-2">
+                            {!isEditingThis && !hasMemo && (
+                              <button
+                                onClick={() => setEditingMemo(memoKey)}
+                                className="bg-purple-600 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-purple-700 active:scale-95 transition"
+                              >
+                                추가
+                              </button>
+                            )}
+                            {!isEditingThis && hasMemo && (
+                              <>
+                                <button
+                                  onClick={() => setEditingMemo(memoKey)}
+                                  className="bg-purple-600 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-purple-700 active:scale-95 transition"
+                                >
+                                  수정
+                                </button>
+                                <button
+                                  onClick={() => deleteMemo(item.date, item.songName)}
+                                  className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-red-600 active:scale-95 transition"
+                                >
+                                  삭제
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {isEditingThis ? (
+                          <div>
+                            <textarea
+                              defaultValue={memos[memoKey] || ''}
+                              placeholder="메모를 입력하세요..."
+                              id={`memo-${index}`}
+                              className="w-full px-3 py-2 border-2 border-purple-300 rounded-lg focus:border-purple-500 focus:outline-none mb-2 min-h-[80px]"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  const text = document.getElementById(`memo-${index}`).value;
+                                  if (text.trim()) {
+                                    saveMemo(item.date, item.songName, text);
+                                  } else {
+                                    alert('메모 내용을 입력해주세요!');
+                                  }
+                                }}
+                                className="flex-1 bg-green-500 text-white py-2 rounded-lg font-semibold hover:bg-green-600 active:scale-95 transition"
+                              >
+                                저장
+                              </button>
+                              <button
+                                onClick={() => setEditingMemo(null)}
+                                className="flex-1 bg-gray-400 text-white py-2 rounded-lg font-semibold hover:bg-gray-500 active:scale-95 transition"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-gray-700 whitespace-pre-wrap break-words">
+                            {hasMemo ? memos[memoKey] : '메모가 없습니다'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Buttons */}
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
+            <div className="max-w-7xl mx-auto flex gap-3">
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex-1 bg-purple-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-purple-700 active:scale-95 transition shadow-lg"
+              >
+                <i className="fas fa-plus mr-2"></i>
+                특송 추가
+              </button>
+              <button
+                onClick={exportToExcel}
+                className="flex-1 bg-green-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-green-700 active:scale-95 transition shadow-lg"
+              >
+                <i className="fas fa-file-excel mr-2"></i>
+                엑셀
+              </button>
+            </div>
+          </div>
+
+          {/* Add Modal */}
+          {showAddModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowAddModal(false)}>
+              <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold text-gray-800">➕ 새 특송 추가</h2>
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="text-gray-400 hover:text-gray-600 text-2xl"
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddSong} className="space-y-4">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">날짜 *</label>
+                    <input
+                      type="date"
+                      value={newSong.date}
+                      onChange={(e) => setNewSong({...newSong, date: e.target.value})}
+                      required
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">카테고리 *</label>
+                    <select
+                      value={newSong.category}
+                      onChange={(e) => setNewSong({...newSong, category: e.target.value})}
+                      required
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                    >
+                      {allCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">곡명 *</label>
+                    <input
+                      type="text"
+                      value={newSong.songName}
+                      onChange={(e) => setNewSong({...newSong, songName: e.target.value})}
+                      placeholder="예: 주님의 은혜"
+                      required
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">팀</label>
+                    <input
+                      type="text"
+                      value={newSong.team}
+                      onChange={(e) => setNewSong({...newSong, team: e.target.value})}
+                      placeholder="예: 엘림 찬양단"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">반주자</label>
+                    <input
+                      type="text"
+                      value={newSong.accompanist}
+                      onChange={(e) => setNewSong({...newSong, accompanist: e.target.value})}
+                      placeholder="예: 김주은"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-2">비고</label>
+                    <textarea
+                      value={newSong.notes}
+                      onChange={(e) => setNewSong({...newSong, notes: e.target.value})}
+                      placeholder="예: 인원: 30명"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none min-h-[100px]"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddModal(false)}
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-300 active:scale-95 transition"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 active:scale-95 transition"
+                    >
+                      추가하기
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
